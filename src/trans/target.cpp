@@ -1873,8 +1873,15 @@ namespace {
                                             TODO(sp, "Handle adding padding");
                                         }
                                         // Add the tag
+                                        auto tag_align_val = niche_path.size;
+                                        // PowerPC 32-bit ABI: non-first fields with natural align 4-8 use embedding align 4
+                                        if(Target_GetCurSpec().m_arch.m_name == "powerpc" && variants[i].ents.size() > 0) {
+                                            if(tag_align_val >= 4 && tag_align_val <= 8) {
+                                                tag_align_val = 4;
+                                            }
+                                        }
                                         variants[i].ents.insert( variants[i].ents.begin(), Ent() );
-                                        variants[i].ents[0].align = niche_path.size;
+                                        variants[i].ents[0].align = tag_align_val;
                                         variants[i].ents[0].size = niche_path.size;
                                         variants[i].ents[0].field = variants[i].ents.size() - 1;
                                         variants[i].ents[0].ty = niche_ty.clone();
@@ -1907,8 +1914,15 @@ namespace {
                                             variants[i].ents.back().size = req_padding;
                                             variants[i].ents.back().field = ~0u;
                                         }
+                                        auto tag_align_val = niche_path.size;
+                                        // PowerPC 32-bit ABI: non-first fields with natural align 4-8 use embedding align 4
+                                        if(Target_GetCurSpec().m_arch.m_name == "powerpc" && variants[i].ents.size() > 0) {
+                                            if(tag_align_val >= 4 && tag_align_val <= 8) {
+                                                tag_align_val = 4;
+                                            }
+                                        }
                                         variants[i].ents.push_back(Ent());
-                                        variants[i].ents.back().align = niche_path.size;
+                                        variants[i].ents.back().align = tag_align_val;
                                         variants[i].ents.back().size = niche_path.size;
                                         variants[i].ents.back().field = tag_fld_idx;
                                         variants[i].ents.back().ty = niche_ty.clone();
@@ -1997,9 +2011,16 @@ namespace {
                         {
                             // - Sort
                             ::std::sort(ents.begin(), ents.end(), sortfn_struct_fields);
-                            // - Add tag
+                            // - Add tag with PowerPC ABI adjustment
+                            auto tag_align_val = tag_align;
+                            // PowerPC 32-bit ABI: non-first fields with natural align 4-8 use embedding align 4
+                            if(Target_GetCurSpec().m_arch.m_name == "powerpc" && ents.size() > 0) {
+                                if(tag_align >= 4 && tag_align <= 8) {
+                                    tag_align_val = 4;
+                                }
+                            }
                             ents.insert(ents.begin(), Ent());
-                            ents[0].align = tag_size;
+                            ents[0].align = tag_align_val;
                             ents[0].size = tag_align;
                             ents[0].field = ents.size() - 1;
                             ents[0].ty = tag_ty.clone();
