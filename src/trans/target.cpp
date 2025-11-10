@@ -1090,8 +1090,12 @@ namespace {
                     {
                         align = 4;
                     }
-                    is_first_field = false;
                 }
+            }
+
+            if ( e.size > 0 )
+            {
+                is_first_field = false;
             }
 
             // Increase offset to fit alignment

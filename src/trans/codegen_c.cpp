@@ -1838,8 +1838,11 @@ namespace {
                             {
                                 field_align = 4;
                             }
-                            is_first_field = false;
                         }
+                    }
+                    if( s > 0 )
+                    {
+                        is_first_field = false;
                     }
                     a = packing_max_align > 0 ? std::min<size_t>(packing_max_align, field_align) : field_align;
                     DEBUG("a = " << a);
