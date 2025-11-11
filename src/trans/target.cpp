@@ -2157,6 +2157,14 @@ namespace {
             if( size == SIZE_MAX ) {
                 BUG(sp, "Unsized type in union");
             }
+            // PowerPC 32-bit ABI: union members with natural alignment 4-8 use embedding alignment 4
+            if(Target_GetCurSpec().m_arch.m_name == "powerpc")
+            {
+                if( align >= 4 && align <= 8 )
+                {
+                    align = 4;
+                }
+            }
             rv.size  = ::std::max(rv.size , size );
             rv.align = ::std::max(rv.align, align);
         }
