@@ -1084,7 +1084,7 @@ namespace {
             // >= 4 and up to 8 use embedding = 4. Skip ZST.
             if(Target_GetCurSpec().m_arch.m_name == "powerpc")
             {
-                if ( e.size > 0 )
+                if ( e.size > 0 && e.field != ~0u )
                 {
                     if( !is_first_field && align >= 4 && align <= 8 )
                     {
@@ -1093,7 +1093,8 @@ namespace {
                 }
             }
 
-            if ( e.size > 0 )
+            // Track first field for all architectures (only actual fields, not padding)
+            if ( e.size > 0 && e.field != ~0u )
             {
                 is_first_field = false;
             }
