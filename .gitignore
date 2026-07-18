@@ -18,7 +18,10 @@
 
 /no_core*
 
+# proc_macro debugging output
 /procmacro_dump*.bin
+# Memory dumps
+/mrustc-*.dmp
 /1.txt
 
 /tools/bin
