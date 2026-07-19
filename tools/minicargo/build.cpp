@@ -576,6 +576,21 @@ bool BuildList::build(BuildOptions opts, unsigned num_jobs, bool dry_run)
             });
         }
         job->m_is_dirty = is_dirty;
+
+        // If deferring codegen, add a new job for running the codegen backend
+        if( job->get_codegen() != helpers::path() )
+        {
+            // TODO: Codegen should re-run if the output file from it is missing
+            auto job_codegen = ::std::make_unique<Job_Codegen>(run_state, job->name(), job->get_outfile(), job->get_codegen());
+            job_codegen->m_is_dirty = is_dirty || run_state.outfile_needs_rebuild(job_codegen->get_outfile());
+            convert_state.add_job(std::move(job_codegen), output_ts, is_dirty);
+            // HACK: Ensure that the dependencies for this job all are for codegen
+            for(auto& d : job->m_dependencies) {
+                if( d[d.size()-1] != ')' ) {
+                    d += " (codegen)";
+                }
+            }
+        }
         convert_state.add_job(std::move(job), output_ts, is_dirty);
     };
 
