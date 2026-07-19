@@ -34,6 +34,10 @@
 #include <target_detect.h>  // tools/common/target_detect.h
 #define HOST_TARGET DEFAULT_TARGET_NAME
 
+bool deferred_codegen_enabled() {
+    return getenv("MINICARGO_DEFER_CODEGEN") != 0;
+}
+
 struct RunState
 {
     BuildOptions&   m_opts;
@@ -188,6 +192,8 @@ public:
     }
     RunnableJob start() override;
     bool complete(bool was_successful) override;
+
+    helpers::path get_outfile() const;
 
     bool    m_is_dirty;
 };
@@ -377,7 +383,7 @@ bool BuildList::build(BuildOptions opts, unsigned num_jobs, bool dry_run)
                     ::std::cerr << "ASSERTION Failed: items_notbuilt.find('"<<k<<"') != items_notbuilt.end" <<std::endl;
                     abort();
                 }
-                // This crate's output is older than the depencency, force a rebuild
+                // This crate's output is older than the dependency, force a rebuild
                 return output_ts < it->second;
             }
         }
@@ -428,6 +434,16 @@ bool BuildList::build(BuildOptions opts, unsigned num_jobs, bool dry_run)
                     });
                     auto name_bs_build = job_bs_build->name();
                     job_bs_build->m_is_dirty = bs_is_dirty;
+
+                    // TODO: Should build scripts also support deferred codegen?
+                    // - For now, just need to make sure that the codegen is completed before build
+                    if( deferred_codegen_enabled() ) {
+                        for(auto& d : job_bs_build->m_dependencies) {
+                            if( d[d.size()-1] != ')' ) {
+                                d += " (codegen)";
+                            }
+                        }
+                    }
                     this->add_job(std::move(job_bs_build), script_ts, bs_is_dirty);
 
                     auto job_bs_run = ::std::make_unique<Job_RunScript>(run_state, p);
@@ -521,10 +537,16 @@ bool BuildList::build(BuildOptions opts, unsigned num_jobs, bool dry_run)
         // If deferring codegen, add a new job for running the codegen backend
         if( job_p->get_codegen() != helpers::path() )
         {
-            // TODO: Ensure that the dependency tree is correct here
+            // TODO: Codegen should re-run if the output file from it is missing
             auto job_codegen = ::std::make_unique<Job_Codegen>(run_state, job_p->name(), job_p->get_outfile(), job_p->get_codegen());
-            job_codegen->m_is_dirty = is_dirty;
+            job_codegen->m_is_dirty = is_dirty || run_state.outfile_needs_rebuild(job_codegen->get_outfile());
             convert_state.add_job(std::move(job_codegen), output_ts, is_dirty);
+            // HACK: Ensure that the dependencies for this job all are for codegen
+            for(auto& d : job_p->m_dependencies) {
+                if( d[d.size()-1] != ')' ) {
+                    d += " (codegen)";
+                }
+            }
         }
     }
 
@@ -928,7 +950,7 @@ helpers::path Job_BuildTarget::get_outfile() const
 }
 helpers::path Job_BuildTarget::get_codegen() const
 {
-    if( getenv("MINICARGO_DEFER_CODEGEN") )
+    if( deferred_codegen_enabled() )
     {
         return this->get_outfile() + "-codegen.sh";
     }
@@ -1081,7 +1103,26 @@ bool Job_Codegen::complete(bool was_successful)
         // On failure, remove the output (to force a rebuild next time)
         remove(this->m_rlib_outfile.str().c_str());
     }
+    else {
+        // TODO: Re-create the original output file created by `mrustc`
+        // - `.rlib` files are created by mrustc, but output binaries are made by `gcc`
+        // - Maybe have mrustc not emit the .rlib if running with a codegen script?
+    }
     return true;
+}
+helpers::path Job_Codegen::get_outfile() const
+{
+    const ::std::string& out = m_rlib_outfile;
+    if(out.compare(out.size() - 5, 5, ".rlib") == 0) {
+        #ifdef _WIN32
+        return out + ".obj";
+        #else
+        return out + ".o";
+        #endif
+    }
+    else {
+        return m_rlib_outfile;
+    }
 }
 
 //
