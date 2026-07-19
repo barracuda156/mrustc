@@ -1,5 +1,10 @@
 #!/bin/bash
 set -e
+
+# Default to using deferred codegen. It reduces peak memory usage, but may cause link errors
+# due to race conditions
+export MINICARGO_DEFER_CODEGEN=${MINICARGO_DEFER_CODEGEN:-1}
+
 export RUSTC_VERSION=1.90.0 MRUSTC_TARGET_VER=1.90 OUTDIR_SUF=-1.90.0
 # Enables use of ccache in mrustc if it's available (i.e. ccache is on PATH)
 command -v ccache >/dev/null && export MRUSTC_CCACHE=1
