@@ -10,6 +10,7 @@
 #include "debug.h"
 #include <cassert>
 #include <string>
+#include <iostream>
 
 /// Representation of a syntatic token in a TOML file
 struct TomlToken
@@ -203,9 +204,10 @@ TomlKeyValue TomlFile::get_next_value()
         rv.value = TomlValue { t.m_data };
         break;
     // Array: Parse the entire list and return as Type::List
-    case TomlToken::Type::SquareOpen:
+    case TomlToken::Type::SquareOpen: {
         rv.path = this->get_path(std::move(key_name));
         rv.value.m_type = TomlValue::Type::List;
+        bool skipped_nested = false;
         while( (t = m_lexer.get_token()).m_type != TomlToken::Type::SquareClose )
         {
             while( t.m_type == TomlToken::Type::Newline )
@@ -231,13 +233,14 @@ TomlKeyValue TomlFile::get_next_value()
                     throw ::std::runtime_error(::format(m_lexer, ": Unexpected identifier in array value position - ", t));
                 }
                 break;
-            // Nested array or inline table: consume it (balanced) and discard.
-            // minicargo only reads flat string/scalar arrays (features, paths,
-            // ...); the nested forms appear solely in `[package.metadata.*]`
-            // packaging sections that minicargo never consults, so skipping
-            // keeps the parse moving instead of aborting the whole manifest.
+            // Nested array or inline table. This parser's value model is flat
+            // (strings / scalars), so these are consumed (balanced) and
+            // discarded rather than aborting the whole file. A warning is
+            // emitted after the loop so a dropped value is noticed if it ever
+            // turns out to matter.
             case TomlToken::Type::SquareOpen:
             case TomlToken::Type::BraceOpen:
+                skipped_nested = true;
                 this->skip_composite_value();
                 break;
             default:
@@ -254,7 +257,15 @@ TomlKeyValue TomlFile::get_next_value()
         }
         if(t.m_type != TomlToken::Type::SquareClose)
             throw ::std::runtime_error(::format(m_lexer, ": Unexpected token after array - ", t));
+        if( skipped_nested )
+        {
+            ::std::string key;
+            for(const auto& c : rv.path) { if(!key.empty()) key += "."; key += c; }
+            ::std::cerr << "warning: " << m_lexer << ": skipped nested array / inline-table element(s) in `" << key
+                        << "` (not represented in the flat TOML value model)" << ::std::endl;
+        }
         break;
+    }
     case TomlToken::Type::BraceOpen:
         m_current_composite.push_back(std::move(key_name));
         DEBUG("Enter composite block " << m_current_block << ", " << m_current_composite);
