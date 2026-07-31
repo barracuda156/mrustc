@@ -38,12 +38,11 @@ bool deferred_codegen_enabled() {
     return getenv("MINICARGO_DEFER_CODEGEN") != 0;
 }
 
-/// Repoint a dependency at the deferred codegen job instead of the transpile job.
-/// Not for a build-script run job: it has no codegen job, so the name is never announced and the tree deadlocks.
 static bool has_suffix(const ::std::string& s, const char* suffix) {
     const size_t n = ::std::strlen(suffix);
     return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
 }
+/// Repoint a dependency at the deferred codegen job - not a build-script run job, which has none
 void make_dep_codegen(::std::string& d) {
     if( has_suffix(d, " (codegen)") || has_suffix(d, " (script run)") ) {
         return;

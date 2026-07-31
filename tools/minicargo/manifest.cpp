@@ -288,8 +288,7 @@ PackageManifest PackageManifest::load_from_toml(const ::std::string& path, const
 
     if( rv.m_enable_implicit_optional_dep_features )
     {
-        // Cargo adds the implicit `foo = ["dep:foo"]` feature only when `[features]` does not mention `dep:foo` itself.
-        // Otherwise an optional dependency and a same-named ordinary feature merge, and enabling the feature drags in the dependency.
+        // Cargo only adds the implicit `foo = ["dep:foo"]` feature when `[features]` doesn't mention `dep:foo` itself
         ::std::set<::std::string>   explicit_dep_refs;
         auto note_dep_refs = [&](const ::std::vector<::std::string>& list) {
             for(const auto& v : list) {

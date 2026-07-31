@@ -294,12 +294,6 @@ impl ::std::str::FromStr for TokenStream {
                                 break ;
                             }
                             else if c == '\\' {
-                                // This match had no arms at all, so *every* escape
-                                // panicked - and a panic here kills the proc-macro
-                                // child, which the compiler reports only as
-                                // "Unexpected EOF while reading from child process".
-                                // `indoc`'s `formatdoc!` (used by `instability`, via
-                                // ratatui) emits a string literal containing `\n`.
                                 match some_else!(it.consume() => return err("str eof"))
                                 {
                                 'n' => s.push('\n'),
@@ -331,8 +325,7 @@ impl ::std::str::FromStr for TokenStream {
                                     }
                                     s.push(some_else!(::std::char::from_u32(v) => return err("Invalid `\\u` escape")));
                                     },
-                                // A backslash at end-of-line eats the newline and all
-                                // leading whitespace on the next line.
+                                // A backslash at end-of-line eats the newline and the next line's leading whitespace
                                 '\n' | '\r' => {
                                     while it.next().map(|c| c.is_whitespace()).unwrap_or(false) {
                                         it.consume();
