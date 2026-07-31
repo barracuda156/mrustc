@@ -83,6 +83,8 @@ struct TypeRepr
 {
     size_t  align = 0;
     size_t  size = 0;
+    /// gcc's `TYPE_USER_ALIGN`: `align` came from an explicit `repr(align(N))` somewhere inside, so it's exempt from a member-alignment cap
+    bool    user_align = false;
 
     struct FieldPath {
         size_t  index;
@@ -176,6 +178,11 @@ static inline unsigned Target_GetPointerBits() { return Target_GetCurSpec().m_ar
 extern bool Target_GetSizeOf(const Span& sp, const StaticTraitResolve& resolve, const ::HIR::TypeRef& ty, size_t& out_size);
 extern bool Target_GetAlignOf(const Span& sp, const StaticTraitResolve& resolve, const ::HIR::TypeRef& ty, size_t& out_align);
 extern bool Target_GetSizeAndAlignOf(const Span& sp, const StaticTraitResolve& resolve, const ::HIR::TypeRef& ty, size_t& out_size, size_t& out_align);
+
+/// Does this target's C ABI cap the alignment of a non-first struct member? (Darwin/PowerPC "power" alignment)
+extern bool Target_CapsMemberAlignment();
+/// gcc's `TYPE_USER_ALIGN`: such a type is exempt from the member-alignment cap above, wherever it appears.
+extern bool Target_TypeHasUserAlignment(const Span& sp, const StaticTraitResolve& resolve, const ::HIR::TypeRef& ty);
 
 /// This function is for the MIR Optimisation tool, which has to be able to read and use existing layouts
 extern void Target_ForceTypeRepr(const Span& sp, const ::HIR::TypeRef& ty, TypeRepr repr);

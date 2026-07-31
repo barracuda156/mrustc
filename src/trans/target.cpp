@@ -69,7 +69,8 @@ const TargetArch ARCH_POWERPC64LE = {
 const TargetArch ARCH_POWERPC = {
     "powerpc",
     32, true,
-    { /*atomic(u8)=*/true, true, true, false,  true },
+    // 8-byte atomics are lock-based via libatomic here, but still available: cfg'ing out AtomicU64 breaks libstd.
+    { /*atomic(u8)=*/true, true, true, true,  true },
     TargetArch::Alignments(2, 4, 8, 8, 4, 8, 4)
 };
 const TargetArch ARCH_RISCV64 = {
@@ -604,12 +605,13 @@ namespace
                 ARCH_X86_64
                 };
         }
+        // `*-apple-darwin` has an empty target_env (as in rustc); "gnu" selects glibc-only code on a platform with no glibc.
         else if(target_name == "i686-apple-darwin")
         {
             // NOTE: OSX uses Mach-O binaries, which don't fully support the defaults used for GNU targets
             // The first 32bit Intel Mac was Core Solo aka yonah. It allows to use `-march=yonah` like Rust.
             return TargetSpec {
-                "unix", "macos", "gnu", {CodegenMode::Gnu11, false, "x86_64-apple-darwin", {"-march=yonah"}, {}},
+                "unix", "macos", "", {CodegenMode::Gnu11, false, "x86_64-apple-darwin", {"-march=yonah"}, {}},
                 ARCH_X86_64
                 };
         }
@@ -618,7 +620,7 @@ namespace
             // NOTE: OSX uses Mach-O binaries, which don't fully support the defaults used for GNU targets
             // The first 64bit Intel Mac was Core Duo. It allows to use `-march=core2` like Rust.
             return TargetSpec {
-                "unix", "macos", "gnu", {CodegenMode::Gnu11, false, "x86_64-apple-darwin", {"-march=core2"}, {}},
+                "unix", "macos", "", {CodegenMode::Gnu11, false, "x86_64-apple-darwin", {"-march=core2"}, {}},
                 ARCH_X86_64
                 };
         }
@@ -626,15 +628,16 @@ namespace
         {
             // NOTE: OSX uses Mach-O binaries, which don't fully support the defaults used for GNU targets
             return TargetSpec {
-                "unix", "macos", "gnu", {CodegenMode::Gnu11, false, "aarch64-apple-darwin", {}, {}},
+                "unix", "macos", "", {CodegenMode::Gnu11, false, "aarch64-apple-darwin", {}, {}},
                 ARCH_ARM64
                 };
         }
         else if(target_name == "powerpc-apple-darwin")
         {
             // NOTE: OSX uses Mach-O binaries, which don't fully support the defaults used for GNU targets
+            // NOTE: 32-bit PowerPC needs libatomic for the 8-byte atomics (see ARCH_POWERPC)
             return TargetSpec {
-                "unix", "macos", "gnu", {CodegenMode::Gnu11, true, "powerpc-apple-darwin", {}, {}},
+                "unix", "macos", "", {CodegenMode::Gnu11, true, "powerpc-apple-darwin", {}, {}, {"-l", "atomic"}},
                 ARCH_POWERPC
                 };
         }
@@ -642,7 +645,7 @@ namespace
         {
             // NOTE: OSX uses Mach-O binaries, which don't fully support the defaults used for GNU targets
             return TargetSpec {
-                "unix", "macos", "gnu", {CodegenMode::Gnu11, false, "powerpc64-apple-darwin", {}, {}},
+                "unix", "macos", "", {CodegenMode::Gnu11, false, "powerpc64-apple-darwin", {}, {}},
                 ARCH_POWERPC64
                 };
         }
@@ -980,10 +983,26 @@ namespace {
         size_t  size;
         size_t  align;
         HIR::TypeRef    ty;
+        /// `align` came from an explicit `repr(align(N))` somewhere inside `ty`.
+        bool    user_align = false;
     };
     ::std::ostream& operator<<(std::ostream& os, const Ent& e) {
-        os << "Ent { #" << e.field << ": s=" << e.size << " a=" << e.align << " : " << e.ty << " }";
+        os << "Ent { #" << e.field << ": s=" << e.size << " a=" << e.align << (e.user_align ? "!" : "") << " : " << e.ty << " }";
         return os;
+    }
+
+    bool make_field_ent(const Span& sp, const StaticTraitResolve& resolve, unsigned idx, ::HIR::TypeRef ty, Ent& out)
+    {
+        size_t  size, align;
+        if( !Target_GetSizeAndAlignOf(sp, resolve, ty, size, align) )
+        {
+            DEBUG("Can't get size/align of " << ty);
+            return false;
+        }
+        out = Ent { idx, size, align, HIR::TypeRef(), false };
+        out.user_align = Target_TypeHasUserAlignment(sp, resolve, ty);
+        out.ty = mv$(ty);
+        return true;
     }
     bool struct_enumerate_fields(const Span& sp, const StaticTraitResolve& resolve, const ::HIR::TypeRef& ty, ::std::vector<Ent>& ents)
     {
@@ -1001,30 +1020,24 @@ namespace {
             unsigned int idx = 0;
             for(const auto& e : se)
             {
-                auto ty = monomorph(e.ent);
-                size_t  size, align;
-                if( !Target_GetSizeAndAlignOf(sp, resolve, ty, size,align) )
-                {
-                    DEBUG("Can't get size/align of " << ty);
+                Ent ent;
+                if( !make_field_ent(sp, resolve, idx, monomorph(e.ent), ent) )
                     return false;
-                }
-                DEBUG("#" << idx << ": s=" << size << ",a=" << align << " " << ty);
-                ents.push_back(Ent { idx++, size, align, mv$(ty) });
+                DEBUG("#" << idx << ": " << ent);
+                idx ++;
+                ents.push_back(mv$(ent));
             }
             }
         TU_ARMA(Named, se) {
             unsigned int idx = 0;
             for(const auto& e : se)
             {
-                auto ty = monomorph(e.ty);
-                size_t  size, align;
-                if( !Target_GetSizeAndAlignOf(sp, resolve, ty, size,align) )
-                {
-                    DEBUG("Can't get size/align of " << ty);
+                Ent ent;
+                if( !make_field_ent(sp, resolve, idx, monomorph(e.ty), ent) )
                     return false;
-                }
-                DEBUG("#" << idx << " " << e.name << ": s=" << size << ",a=" << align << " " << ty);
-                ents.push_back(Ent { idx++, size, align, mv$(ty) });
+                DEBUG("#" << idx << " " << e.name << ": " << ent);
+                idx ++;
+                ents.push_back(mv$(ent));
             }
             }
         }
@@ -1082,16 +1095,20 @@ namespace {
             // PowerPC 32-bit ABI
             // First element uses natural alignment, subsequent elements with natural alignment
             // >= 4 and up to 8 use embedding = 4. Skip ZST.
-            if(Target_GetCurSpec().m_arch.m_name == "powerpc")
+            // The cap is on natural alignment only: an explicitly aligned member keeps it, as in gcc.
+            if(Target_CapsMemberAlignment())
             {
                 if ( e.size > 0 )
                 {
-                    if( !is_first_field && align >= 4 && align <= 8 )
+                    if( !is_first_field && !e.user_align && align >= 4 && align <= 8 )
                     {
                         align = 4;
                     }
                     is_first_field = false;
                 }
+            }
+            if( e.user_align ) {
+                rv.user_align = true;
             }
 
             // Increase offset to fit alignment
@@ -1127,6 +1144,8 @@ namespace {
         }
         if(forced_alignment > 0) {
             max_align = std::max(max_align, static_cast<size_t>(forced_alignment));
+            // `repr(align(N))` - this is the root of a user-alignment chain.
+            rv.user_align = true;
         }
         // If not packing (and the size isn't infinite/unsized) then round the size up to the alignment
         if( cur_ofs != SIZE_MAX )
@@ -1193,13 +1212,11 @@ namespace {
             unsigned int idx = 0;
             for(const auto& t : *te)
             {
-                size_t  size, align;
-                if( !Target_GetSizeAndAlignOf(sp, resolve, t, size,align) )
-                {
-                    DEBUG("Can't get size/align of " << t);
+                Ent ent;
+                if( !make_field_ent(sp, resolve, idx, t.clone(), ent) )
                     return nullptr;
-                }
-                ents.push_back(Ent { idx++, size, align, t.clone() });
+                idx ++;
+                ents.push_back(mv$(ent));
             }
             sorting = StructSorting::All;
         }
@@ -1847,6 +1864,9 @@ namespace {
                             // Generate raw struct reprs for all variants
                             // - Add `non_niche_offset` to all variants
                             assert(reprs.size() == variants.size());
+                            // Size/alignment of the union of the *final* variant layouts, which is what codegen emits.
+                            size_t final_size = 0;
+                            size_t final_align = 1;
                             for(size_t i = 0; i < reprs.size(); i ++)
                             {
                                 if( e[i].type != HIR::TypeRef::new_unit() )
@@ -1913,19 +1933,38 @@ namespace {
                                         assert(reprs[i]->size <= max_size);
                                         assert(reprs[i]->align <= max_align);
                                     }
+                                    final_size  = std::max(final_size , reprs[i]->size );
+                                    final_align = std::max(final_align, reprs[i]->align);
                                     set_type_repr(sp, variants[i].type, std::move(reprs[i]));
                                 }
                                 else
                                 {
                                     // Note: unit type (any empty type) doesn't need the tag added
                                     // NOTE: Unit type should already have a repr, but make sure
-                                    Target_GetTypeRepr(sp, resolve, variants[i].type);
+                                    if( const auto* r = Target_GetTypeRepr(sp, resolve, variants[i].type) ) {
+                                        final_size  = std::max(final_size , r->size );
+                                        final_align = std::max(final_align, r->align);
+                                    }
                                 }
                                 rv.fields.push_back(TypeRepr::Field { 0, mv$(variants[i].type) });
                             }
 
                             rv.size = max_size;
                             rv.align = max_align;
+
+                            // Under a capping ABI take size/align from the final variant layouts - `max_align` predates the tag field, so it over-states them
+                            if( Target_CapsMemberAlignment() && final_size > 0 )
+                            {
+                                size_t sz = final_size;
+                                while( sz % final_align != 0 )
+                                    sz ++;
+                                if( sz != rv.size || final_align != rv.align ) {
+                                    DEBUG("Capping ABI: " << ty << " " << rv.size << "/" << rv.align
+                                        << " -> " << sz << "/" << final_align << " (union of the final variants)");
+                                    rv.size = sz;
+                                    rv.align = final_align;
+                                }
+                            }
 
                             // Ensure that the tag offset is still valid
                             auto tag_offset = get_offset(sp, resolve, &rv, niche_path);
@@ -2127,6 +2166,14 @@ namespace {
                 << " }");
             }
         }
+
+        // An enum inherits user-alignment from any variant, as in gcc; every variant repr is already cached here, so this cannot recurse.
+        for(const auto& f : rv.fields) {
+            if( Target_TypeHasUserAlignment(sp, resolve, f.ty) ) {
+                rv.user_align = true;
+                break;
+            }
+        }
         return box$(rv);
     }
     ::std::unique_ptr<TypeRepr> make_type_repr_union(const Span& sp, const StaticTraitResolve& resolve, const ::HIR::TypeRef& ty)
@@ -2140,6 +2187,8 @@ namespace {
         };
 
         TypeRepr  rv;
+        // codegen_c pins union alignment with an explicit `__attribute__((aligned))`, which gcc counts as user-alignment - so a union, and anything containing it, is exempt from the cap.
+        rv.user_align = true;
         for(const auto& var : unn.m_variants)
         {
             rv.fields.push_back({ 0, monomorph(var.ty) });
@@ -2155,6 +2204,10 @@ namespace {
             }
             rv.size  = ::std::max(rv.size , size );
             rv.align = ::std::max(rv.align, align);
+            // A union inherits user-alignment from any member, as in gcc.
+            if( Target_TypeHasUserAlignment(sp, resolve, rv.fields.back().ty) ) {
+                rv.user_align = true;
+            }
         }
         // Round the size to be a multiple of align
         if( rv.size % rv.align != 0 )
@@ -2218,6 +2271,31 @@ namespace {
 void Target_ForceTypeRepr(const Span& sp, const ::HIR::TypeRef& ty, TypeRepr repr)
 {
     set_type_repr(sp, ty, box$(repr));
+}
+bool Target_CapsMemberAlignment()
+{
+    return Target_GetCurSpec().m_arch.m_name == "powerpc";
+}
+bool Target_TypeHasUserAlignment(const Span& sp, const StaticTraitResolve& resolve, const ::HIR::TypeRef& ty)
+{
+    // Arrays and slices inherit it from the element type, as in gcc's `layout_type`
+    if( const auto* te = ty.data().opt_Array() ) {
+        return Target_TypeHasUserAlignment(sp, resolve, te->inner);
+    }
+    if( const auto* te = ty.data().opt_Slice() ) {
+        return Target_TypeHasUserAlignment(sp, resolve, te->inner);
+    }
+    // Aggregates cache it on their repr; everything else is naturally aligned by definition
+    if( ty.data().is_Tuple() || (ty.data().is_Path() && (
+            ty.data().as_Path().binding.is_Struct()
+            || ty.data().as_Path().binding.is_Union()
+            || ty.data().as_Path().binding.is_Enum()
+            )) )
+    {
+        const auto* repr = Target_GetTypeRepr(sp, resolve, ty);
+        return repr && repr->user_align;
+    }
+    return false;
 }
 const TypeRepr* Target_GetTypeRepr(const Span& sp, const StaticTraitResolve& resolve, const ::HIR::TypeRef& ty)
 {
