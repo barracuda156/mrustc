@@ -25,6 +25,10 @@ public:
         else if( name == "cdylib" ) {
             crate.m_crate_type = AST::Crate::Type::CDylib;
         }
+        // `Type::ProcMacro` was only reachable from `--crate-type`, not from the inner attribute.
+        else if( name == "proc-macro" ) {
+            crate.m_crate_type = AST::Crate::Type::ProcMacro;
+        }
         else {
             ERROR(sp, E0000, "Unknown crate type '" << name << "'");
         }

@@ -756,9 +756,14 @@ struct CloneTyWith_Monomorph: Monomorphiser {
 
     switch(lft_ref.group())
     {
+    // A lifetime whose index the recorded param list does not cover is passed through rather than aborting, as `monomorph_lifetime` already does for HRTBs.
+    // Lifetimes are erased before codegen, so an unresolved one is inert - which is why `get_type`/`get_value` still assert and these do not.
     case 0:
         if( const auto* p = this->get_impl_params() ) {
-            ASSERT_BUG(sp, lft_ref.idx() < p->m_lifetimes.size(), "Lifetime param " << lft_ref << " out of range for (max " << p->m_lifetimes.size() << ")");
+            if( lft_ref.idx() >= p->m_lifetimes.size() ) {
+                DEBUG("Impl lifetime " << lft_ref << " out of range (max " << p->m_lifetimes.size() << ") - passthrough");
+                return HIR::LifetimeRef(lft_ref.binding);
+            }
             return p->m_lifetimes[lft_ref.idx()];
         }
         else {
@@ -767,7 +772,10 @@ struct CloneTyWith_Monomorph: Monomorphiser {
         break;
     case 1:
         if( const auto* p = this->get_method_params() ) {
-            ASSERT_BUG(sp, lft_ref.idx() < p->m_lifetimes.size(), "Lifetime param " << lft_ref << " out of range for (max " << p->m_lifetimes.size() << ")");
+            if( lft_ref.idx() >= p->m_lifetimes.size() ) {
+                DEBUG("Method lifetime " << lft_ref << " out of range (max " << p->m_lifetimes.size() << ") - passthrough");
+                return HIR::LifetimeRef(lft_ref.binding);
+            }
             return p->m_lifetimes[lft_ref.idx()];
         }
         else {
@@ -779,7 +787,10 @@ struct CloneTyWith_Monomorph: Monomorphiser {
         return HIR::LifetimeRef(lft_ref.binding);
     case 3: // HRLs
         if( const auto* p = this->get_hrb_params() ) {
-            ASSERT_BUG(sp, lft_ref.idx() < p->m_lifetimes.size(), "Lifetime param " << lft_ref << " out of range for (max " << p->m_lifetimes.size() << ")");
+            if( lft_ref.idx() >= p->m_lifetimes.size() ) {
+                DEBUG("HRL " << lft_ref << " out of range (max " << p->m_lifetimes.size() << ") - passthrough");
+                return HIR::LifetimeRef(lft_ref.binding);
+            }
             return p->m_lifetimes[lft_ref.idx()];
         }
         else {

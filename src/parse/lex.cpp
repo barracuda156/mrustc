@@ -519,7 +519,12 @@ Token Lexer::getTokenInt()
                     else if(suffix == "f64") num_type = CORETYPE_F64;
                     else if(suffix == "f128") num_type = CORETYPE_F128;
                     else
-                        ERROR(this->point_span(), E0000, "Unknown integer suffix " << suffix);
+                    {
+                        // Not a numeric type suffix. rustc accepts any identifier as a literal suffix and only rejects it on evaluation, so a suffixed literal used only inside a macro is legal.
+                        // Emit the suffix as a following identifier token: matcher and invocation take this same path, so they split identically.
+                        m_next_tokens.push_back(Token(TOK_IDENT, Ident(this->realGetHygiene(), RcString::new_interned(suffix))));
+                        return Token(val, CORETYPE_ANY);
+                    }
                     return Token(val, num_type);
                 }
                 else {
