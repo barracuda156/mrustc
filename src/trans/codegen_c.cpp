@@ -1758,6 +1758,8 @@ namespace {
             ::std::vector<unsigned> fields; fields.reserve(repr->fields.size());
             ::std::vector<bool>   zsts; zsts.reserve(repr->fields.size());
             size_t max_align = 0;
+            // `max_align` is the largest natural field alignment; `c_max_align` is what the C compiler will derive for the emitted struct.
+            size_t c_max_align = 0;
             bool has_manual_align = false;
             for(const auto& ent : repr->fields)
             {
@@ -1769,12 +1771,25 @@ namespace {
                     has_manual_align = true;
                 }
                 max_align = std::max(max_align, al);
+                // Track what C will derive separately - under a capping ABI an interior over-aligned member doesn't raise it
+                {
+                    size_t al_c = al;
+                    if( Target_CapsMemberAlignment() && sz > 0 && ent.offset != 0 && al_c > 4
+                        && !Target_TypeHasUserAlignment(sp, m_resolve, ty) ) {
+                        al_c = 4;
+                    }
+                    c_max_align = std::max(c_max_align, al_c);
+                }
 
                 fields.push_back(fields.size());
                 zsts.push_back(sz == 0);
             }
-            if(packing_max_align == 0 && max_align != repr->align /*&& repr->size > 0*/) {
+            if(packing_max_align == 0 && c_max_align != repr->align /*&& repr->size > 0*/) {
                 has_manual_align = true;
+            }
+            // An align-1 type must be emitted packed - gcc takes a container's alignment from the member's natural alignment
+            if(packing_max_align == 0 && !has_manual_align && repr->align == 1 && repr->size > 1) {
+                packing_max_align = 1;
             }
             // - Sort the fields by offset
             ::std::sort(fields.begin(), fields.end(), [&](auto a, auto b){
@@ -2078,7 +2093,13 @@ namespace {
                 assert(repr->fields[i].offset == 0);
                 m_of << "\t"; emit_ctype( repr->fields[i].ty, FMT_CB(ss, ss << "var_" << i;) ); m_of << ";\n";
             }
-            m_of << "};\n";
+            m_of << "}";
+            // Pin union alignment - under the power ABI gcc takes a union's alignment from its *first* member
+            if( m_compiler == Compiler::Gcc && repr->align > 0 )
+            {
+                m_of << " __attribute__((__aligned__(" << repr->align << ")))";
+            }
+            m_of << ";\n";
             if( true && repr->size > 0 )
             {
                 m_of << "typedef char sizeof_assert_" << Trans_Mangle(p) << "[ (sizeof(union u_" << Trans_Mangle(p) << ") == " << repr->size << ") ? 1 : -1 ];\n";

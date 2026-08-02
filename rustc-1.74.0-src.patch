@@ -146,3 +146,32 @@
 +#include <cstdint>
  #include <memory>
  
+
+# macos_weak only defines the fdopendir weak symbol for x86/x86_64; other macOS targets emit neither arm.
+# 10.4/10.5 have no $INODE64 variants, so the plain symbol is the correct one there.
+--- library/std/src/sys/unix/fs.rs
++++ library/std/src/sys/unix/fs.rs
+@@ -1979,6 +1979,8 @@
+             weak!(fn fdopendir(c_int) -> *mut DIR, "fdopendir$INODE64$UNIX2003");
+             #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+             weak!(fn fdopendir(c_int) -> *mut DIR, "fdopendir$INODE64");
++            #[cfg(all(target_os = "macos", not(any(target_arch = "x86", target_arch = "x86_64"))))]
++            weak!(fn fdopendir(c_int) -> *mut DIR);
+             fdopendir.get().map(|fdopendir| fdopendir(fd)).unwrap_or_else(|| {
+                 crate::sys::unix::os::set_errno(libc::ENOSYS);
+                 crate::ptr::null_mut()
+
+# The Darwin thread parker needs libdispatch (10.6+); powerpc-apple-darwin is 10.4/10.5, so use the generic pthread parker.
+--- library/std/src/sys/unix/thread_parking/mod.rs
++++ library/std/src/sys/unix/thread_parking/mod.rs
+@@ -18,6 +18,10 @@
+             target_os = "watchos",
+             target_os = "tvos",
+         ),
++        // The Darwin parker is built on libdispatch, which is 10.6+.
++        // powerpc-apple-darwin is by definition 10.4/10.5, so it falls through
++        // to the generic pthread parker.
++        not(target_arch = "powerpc"),
+         not(miri),
+     ))] {
+         mod darwin;

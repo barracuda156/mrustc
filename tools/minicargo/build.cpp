@@ -913,7 +913,8 @@ void Job_Build::push_args_common(StringList& args, const helpers::path& outfile,
     if( parent.m_opts.enable_debug ) {
         args.push_back("-g");
     }
-    if( true ) {
+    // `debug_assertions` enables `assert_unsafe_precondition!`, which a C-ABI-driven layout can't satisfy (8-aligned field at a 4-aligned offset)
+    if( !getenv("MINICARGO_NO_DEBUG_ASSERTIONS") ) {
         if( parent.is_rustc() ) {
             args.push_back("-C"); args.push_back("debug-assertions");
         }
